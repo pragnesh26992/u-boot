@@ -31,15 +31,19 @@
 #include <common.h>
 #include <asm/io.h>
 #include <clk-uclass.h>
+#include <reset-uclass.h>
 #include <clk.h>
 #include <div64.h>
 #include <dm.h>
+#include <dm/device.h>
+#include <dm/uclass.h>
 #include <errno.h>
 #include <linux/delay.h>
 #include <linux/err.h>
 
 #include <linux/math64.h>
 #include <linux/clk/analogbits-wrpll-cln28hpc.h>
+#include <asm/arch/reset.h>
 #include <dt-bindings/clock/sifive-fu540-prci.h>
 
 /*
@@ -146,6 +150,8 @@
 #define PRCI_DEVICESRESETREG_GEMGXL_RST_N_SHIFT 5
 #define PRCI_DEVICESRESETREG_GEMGXL_RST_N_MASK \
 			(0x1 << PRCI_DEVICESRESETREG_GEMGXL_RST_N_SHIFT)
+
+#define PRCI_DEVICERESETCNT 5
 
 /* CLKMUXSTATUSREG */
 #define PRCI_CLKMUXSTATUSREG_OFFSET	0x2c
@@ -528,6 +534,40 @@ static const struct __prci_clock_ops sifive_fu540_prci_tlclksel_clk_ops = {
 	.recalc_rate = sifive_fu540_prci_tlclksel_recalc_rate,
 };
 
+static int __prci_consumer_reset(const char *rst_name, bool trigger)
+{
+	struct udevice *dev;
+	struct reset_ctl rst_sig;
+	int ret;
+
+	ret = uclass_get_device_by_driver(UCLASS_RESET,
+					  DM_GET_DRIVER(sifive_reset),
+					  &dev);
+	if (ret) {
+		dev_err(dev, "Reset driver not found: %d\n", ret);
+		return ret;
+	}
+
+	ret = reset_get_by_name(dev, rst_name, &rst_sig);
+	if (ret) {
+		dev_err(dev, "failed to get %s reset\n", rst_name);
+		return ret;
+	}
+
+	if (reset_valid(&rst_sig)) {
+		if (trigger)
+			ret = reset_deassert(&rst_sig);
+		else
+			ret = reset_assert(&rst_sig);
+		if (ret) {
+			dev_err(dev, "failed to trigger reset id = %ld\n",
+				rst_sig.id);
+			return ret;
+		}
+	}
+
+	return ret;
+}
 /**
  * __prci_ddr_release_reset() - Release DDR reset
  * @pd: struct __prci_data * for the PRCI containing the DDRCLK mux reg
@@ -535,19 +575,20 @@ static const struct __prci_clock_ops sifive_fu540_prci_tlclksel_clk_ops = {
  */
 static void __prci_ddr_release_reset(struct __prci_data *pd)
 {
-	u32 v;
-
-	v = __prci_readl(pd, PRCI_DEVICESRESETREG_OFFSET);
-	v |= PRCI_DEVICESRESETREG_DDR_CTRL_RST_N_MASK;
-	__prci_writel(v, PRCI_DEVICESRESETREG_OFFSET, pd);
+	/* Release DDR ctrl reset */
+	__prci_consumer_reset("ddr_ctrl", true);
 
 	/* HACK to get the '1 full controller clock cycle'. */
 	asm volatile ("fence");
-	v = __prci_readl(pd, PRCI_DEVICESRESETREG_OFFSET);
-	v |= (PRCI_DEVICESRESETREG_DDR_AXI_RST_N_MASK |
-			PRCI_DEVICESRESETREG_DDR_AHB_RST_N_MASK |
-			PRCI_DEVICESRESETREG_DDR_PHY_RST_N_MASK);
-	__prci_writel(v, PRCI_DEVICESRESETREG_OFFSET, pd);
+
+	/* Release DDR AXI reset */
+	__prci_consumer_reset("ddr_axi", true);
+
+	/* Release DDR AHB reset */
+	__prci_consumer_reset("ddr_ahb", true);
+
+	/* Release DDR PHY reset */
+	__prci_consumer_reset("ddr_phy", true);
 
 	/* HACK to get the '1 full controller clock cycle'. */
 	asm volatile ("fence");
@@ -567,12 +608,8 @@ static void __prci_ddr_release_reset(struct __prci_data *pd)
  */
 static void __prci_ethernet_release_reset(struct __prci_data *pd)
 {
-	u32 v;
-
 	/* Release GEMGXL reset */
-	v = __prci_readl(pd, PRCI_DEVICESRESETREG_OFFSET);
-	v |= PRCI_DEVICESRESETREG_GEMGXL_RST_N_MASK;
-	__prci_writel(v, PRCI_DEVICESRESETREG_OFFSET, pd);
+	__prci_consumer_reset("gemgxl_reset", true);
 
 	/* Procmon => core clock */
 	__prci_writel(PRCI_PROCMONCFG_CORE_CLOCK_MASK, PRCI_PROCMONCFG_OFFSET,
@@ -757,6 +794,11 @@ static struct clk_ops sifive_fu540_prci_ops = {
 	.disable = sifive_fu540_prci_disable,
 };
 
+static int sifive_fu540_clk_bind(struct udevice *dev)
+{
+	return sifive_reset_bind(dev, PRCI_DEVICERESETCNT);
+}
+
 static const struct udevice_id sifive_fu540_prci_ids[] = {
 	{ .compatible = "sifive,fu540-c000-prci" },
 	{ }
@@ -769,4 +811,5 @@ U_BOOT_DRIVER(sifive_fu540_prci) = {
 	.probe = sifive_fu540_prci_probe,
 	.ops = &sifive_fu540_prci_ops,
 	.priv_auto_alloc_size = sizeof(struct __prci_data),
+	.bind = sifive_fu540_clk_bind,
 };
