@@ -59,6 +59,16 @@
 			reg = <0x0 0x2000000 0x0 0xc0000>;
 			u-boot,dm-spl;
 		};
+		prci: clock-controller@10000000 {
+			#reset-cells = <1>;
+			resets = <&prci PRCI_RST_DDR_CTRL_N>,
+				 <&prci PRCI_RST_DDR_AXI_N>,
+				 <&prci PRCI_RST_DDR_AHB_N>,
+				 <&prci PRCI_RST_DDR_PHY_N>,
+				 <&prci PRCI_RST_GEMGXL_N>;
+			reset-names = "ddr_ctrl", "ddr_axi", "ddr_ahb",
+					"ddr_phy", "gemgxl_reset";
+		};
 		dmc: dmc@100b0000 {
 			compatible = "sifive,fu540-c000-ddr";
 			reg = <0x0 0x100b0000 0x0 0x0800
