@@ -72,7 +72,7 @@ struct mmc_spi_priv {
 static int mmc_spi_sendcmd(struct udevice *dev,
 			   ushort cmdidx, u32 cmdarg, u32 resp_type,
 			   u8 *resp, u32 resp_size,
-			   bool resp_match, u8 resp_match_value)
+			   bool resp_match, u8 resp_match_value, u8 r1b)
 {
 	int i, rpos = 0, ret = 0;
 	u8 cmdo[7], r;
@@ -105,10 +105,12 @@ static int mmc_spi_sendcmd(struct udevice *dev,
 	if (resp_match) {
 		r = ~resp_match_value;
 		i = CMD_TIMEOUT;
-		while (i--) {
+		while (i) {
+			i--;
 			ret = dm_spi_xfer(dev, 1 * 8, NULL, &r, 0);
 			if (ret)
 				return ret;
+
 			debug(" resp%d=0x%x", rpos, r);
 			rpos++;
 			if (r == resp_match_value)
@@ -129,6 +131,22 @@ static int mmc_spi_sendcmd(struct udevice *dev,
 		debug(" resp%d=0x%x", rpos, r);
 		rpos++;
 		resp[i] = r;
+	}
+
+	if (r1b == 1) {
+		while (1) {
+			ret = dm_spi_xfer(dev, 1 * 8, NULL, &r, 0);
+			if (ret)
+				return ret;
+
+			debug("i resp%d=0x%x", rpos, r);
+			rpos++;
+
+			if (r) {
+				debug("\n");
+				return 0;
+			}
+		}
 	}
 
 	debug("\n");
@@ -264,7 +282,7 @@ static int dm_mmc_spi_request(struct udevice *dev, struct mmc_cmd *cmd,
 	u8 *resp = NULL;
 	u32 resp_size = 0;
 	bool resp_match = false;
-	u8 resp8 = 0, resp40[5] = { 0 }, resp_match_value = 0;
+	u8 resp8 = 0, resp40[5] = { 0 }, resp_match_value = 0, r1b = 0;
 
 	dm_spi_claim_bus(dev);
 
@@ -289,20 +307,33 @@ static int dm_mmc_spi_request(struct udevice *dev, struct mmc_cmd *cmd,
 		resp_size = sizeof(resp40);
 		break;
 	case MMC_CMD_SEND_STATUS:
+		resp = (u8 *)&resp40[0];
+		resp_size = 2;
+		break;
 	case MMC_CMD_SET_BLOCKLEN:
 	case MMC_CMD_SPI_CRC_ON_OFF:
-	case MMC_CMD_STOP_TRANSMISSION:
 		resp = &resp8;
 		resp_size = sizeof(resp8);
 		resp_match = true;
 		resp_match_value = 0x0;
 		break;
-	case MMC_CMD_SEND_CSD:
-	case MMC_CMD_SEND_CID:
+	case MMC_CMD_STOP_TRANSMISSION:	// r1b hack
+	case MMC_CMD_ERASE:		// r1b hack
+		r1b = 1;
+		resp = &resp8;
+		resp_size = 1;
+		break;
 	case MMC_CMD_READ_SINGLE_BLOCK:
 	case MMC_CMD_READ_MULTIPLE_BLOCK:
 	case MMC_CMD_WRITE_SINGLE_BLOCK:
 	case MMC_CMD_WRITE_MULTIPLE_BLOCK:
+	case SD_CMD_ERASE_WR_BLK_START:
+	case SD_CMD_ERASE_WR_BLK_END:
+	case MMC_CMD_SEND_CSD:
+	case MMC_CMD_SEND_CID:
+	case MMC_CMD_APP_CMD:
+		resp = &resp8;
+		resp_size = sizeof(resp8);
 		break;
 	default:
 		resp = &resp8;
@@ -313,7 +344,7 @@ static int dm_mmc_spi_request(struct udevice *dev, struct mmc_cmd *cmd,
 	};
 
 	ret = mmc_spi_sendcmd(dev, cmd->cmdidx, cmd->cmdarg, cmd->resp_type,
-			      resp, resp_size, resp_match, resp_match_value);
+			      resp, resp_size, resp_match, resp_match_value, r1b);
 	if (ret)
 		goto done;
 
