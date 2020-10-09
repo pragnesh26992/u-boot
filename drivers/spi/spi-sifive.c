@@ -240,8 +240,25 @@ static int sifive_spi_xfer(struct udevice *dev, unsigned int bitlen,
 				sifive_spi_tx(spi, NULL);
 			else
 				sifive_spi_tx(spi, tx_ptr++);
+
+                        /* Wait for transmission to complete */
+                        ret = sifive_spi_wait(spi, SIFIVE_SPI_IP_TXWM);
+                        if (ret)
+                                return ret;
+
+			if(rx_ptr) {
+			/* Wait for transmission + reception to complete */
+			//writel(n_words - 1, spi->regs + SIFIVE_SPI_REG_RXMARK);
+			ret = sifive_spi_wait(spi, SIFIVE_SPI_IP_RXWM);
+			if (ret)
+				return ret;
+
+				sifive_spi_rx(spi, rx_ptr++);
+
+			}
 		}
 
+#if 0
 		if (rx_ptr) {
 			/* Wait for transmission + reception to complete */
 			writel(n_words - 1, spi->regs + SIFIVE_SPI_REG_RXMARK);
@@ -258,7 +275,7 @@ static int sifive_spi_xfer(struct udevice *dev, unsigned int bitlen,
 			if (ret)
 				return ret;
 		}
-
+#endif
 		remaining_len -= n_words;
 	}
 

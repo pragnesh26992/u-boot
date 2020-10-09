@@ -23,7 +23,7 @@
 
 	memory@80000000 {
 		device_type = "memory";
-		reg = <0x0 0x80000000 0x2 0x00000000>;
+		reg = <0x0 0x80000000 0x1 0x00000000>;
 	};
 
 	soc {
@@ -59,7 +59,7 @@
 &i2c0 {
 	status = "okay";
 };
-
+/*
 &qspi0 {
 	status = "okay";
 	flash@0 {
@@ -71,7 +71,7 @@
 		spi-rx-bus-width = <4>;
 	};
 };
-
+*/
 &qspi2 {
 	status = "okay";
 	mmc@0 {
