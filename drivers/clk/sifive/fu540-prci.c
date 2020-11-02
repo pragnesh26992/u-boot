@@ -440,6 +440,19 @@ static unsigned long sifive_fu540_prci_wrpll_recalc_rate(
 	return wrpll_calc_output_rate(&pwd->c, parent_rate);
 }
 
+static unsigned long tmp_sifive_fu540_prci_wrpll_recalc_rate(
+						struct __prci_clock *pc,
+						unsigned long parent_rate)
+{
+	struct __prci_wrpll_data *pwd = pc->pwd;
+
+	pwd->c.divr = 0;
+	pwd->c.divf = 79;
+	pwd->c.divq = 4;
+	pwd->c.range = 3;
+	return wrpll_calc_output_rate(&pwd->c, parent_rate);
+}
+
 static unsigned long sifive_fu540_prci_wrpll_round_rate(
 						struct __prci_clock *pc,
 						unsigned long rate,
@@ -506,6 +519,13 @@ static const struct __prci_clock_ops sifive_fu540_prci_wrpll_clk_ops = {
 	.set_rate = sifive_fu540_prci_wrpll_set_rate,
 	.round_rate = sifive_fu540_prci_wrpll_round_rate,
 	.recalc_rate = sifive_fu540_prci_wrpll_recalc_rate,
+	.enable_clk = sifive_fu540_prci_clock_enable,
+};
+
+static const struct __prci_clock_ops tmp_sifive_fu540_prci_wrpll_clk_ops = {
+	.set_rate = sifive_fu540_prci_wrpll_set_rate,
+	.round_rate = sifive_fu540_prci_wrpll_round_rate,
+	.recalc_rate = tmp_sifive_fu540_prci_wrpll_recalc_rate,
 	.enable_clk = sifive_fu540_prci_clock_enable,
 };
 
@@ -650,7 +670,7 @@ static struct __prci_clock __prci_init_clocks[] = {
 	[PRCI_CLK_DDRPLL] = {
 		.name = "ddrpll",
 		.parent_name = "hfclk",
-		.ops = &sifive_fu540_prci_wrpll_clk_ops,
+		.ops = &tmp_sifive_fu540_prci_wrpll_clk_ops,
 		.pwd = &__prci_ddrpll_data,
 	},
 	[PRCI_CLK_GEMGXLPLL] = {
@@ -724,6 +744,7 @@ static int sifive_fu540_prci_enable(struct clk *clk)
 {
 	struct __prci_clock *pc;
 	int ret = 0;
+	ulong ddr_rate;
 
 	if (ARRAY_SIZE(__prci_init_clocks) <= clk->id)
 		return -ENXIO;
@@ -734,6 +755,10 @@ static int sifive_fu540_prci_enable(struct clk *clk)
 
 	if (pc->ops->enable_clk)
 		ret = pc->ops->enable_clk(pc, 1);
+
+	ddr_rate = __prci_init_clocks[PRCI_CLK_DDRPLL].ops->recalc_rate(&__prci_init_clocks[PRCI_CLK_DDRPLL], sifive_fu540_prci_parent_rate(&__prci_init_clocks[PRCI_CLK_DDRPLL]));
+
+	printf("ddr_rate = %lx\n", ddr_rate);
 
 	return ret;
 }
